@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"log"
 	"net/http"
@@ -33,6 +35,8 @@ var upgrader = websocket.Upgrader{
 }
 
 type Client struct {
+	uuid string
+
 	hub *Hub
 
 	// The websocket connection.
@@ -40,6 +44,15 @@ type Client struct {
 
 	// Buffered channel of outbound messages.
 	send chan []byte
+}
+
+func NewClient(hub *Hub, conn *websocket.Conn) *Client {
+	return &Client{
+		uuid: uuid.New().String(),
+		hub:  hub,
+		conn: conn,
+		send: make(chan []byte, 256),
+	}
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -67,6 +80,7 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+		fmt.Println(c.uuid, " input message: ", string(message))
 		c.hub.broadcast <- message
 	}
 }
@@ -104,6 +118,8 @@ func (c *Client) writePump() {
 				w.Write(<-c.send)
 			}
 
+			fmt.Println(c.uuid, " read message: ", string(message), " from broadcast.")
+
 			if err := w.Close(); err != nil {
 				return
 			}
@@ -124,9 +140,9 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256)}
+	client := NewClient(hub, conn)
 	client.hub.register <- client
-
+	fmt.Println(client.uuid, " registered.")
 	// Allow collection of memory referenced by the caller by doing all work in new goroutine
 	go client.writePump()
 	go client.readPump()
